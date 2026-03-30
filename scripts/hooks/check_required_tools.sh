@@ -2,7 +2,7 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-if [ "$#" -eq 0 ]; then
+if [[ "$#" -eq 0 ]]; then
   echo "Usage: $0 <tool> [tool...]" >&2
   exit 1
 fi
@@ -27,6 +27,7 @@ install_hint() {
       echo "Install '$1' and ensure it is available in PATH."
       ;;
   esac
+  return 0
 }
 
 for tool in "$@"; do

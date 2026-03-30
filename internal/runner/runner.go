@@ -17,6 +17,8 @@ import (
 	"github.com/ffreis/platform-runner/internal/template"
 )
 
+const msgWorkspaceEnsureFailed = "workspace ensure failed"
+
 // RunnerOptions configures a Runner instance.
 type RunnerOptions struct {
 	TemplateDir string
@@ -151,7 +153,7 @@ func (r *Runner) PlanAll(ctx context.Context) (*RunReport, error) {
 			Token:   r.token,
 		}
 		if err := w.Ensure(ctx); err != nil {
-			log.Error("workspace ensure failed", zap.Error(err))
+			log.Error(msgWorkspaceEnsureFailed, zap.Error(err))
 			return RepoResult{
 				Repo:   t.repo.Name,
 				Env:    t.env,
@@ -219,7 +221,7 @@ func (r *Runner) ApplyAll(ctx context.Context, confirm bool) (*RunReport, error)
 			Token:   r.token,
 		}
 		if err := w.Ensure(ctx); err != nil {
-			log.Error("workspace ensure failed", zap.Error(err))
+			log.Error(msgWorkspaceEnsureFailed, zap.Error(err))
 			return RepoResult{
 				Repo:   t.repo.Name,
 				Env:    t.env,
@@ -299,12 +301,12 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 				Token:   r.token,
 			}
 			if err := w.Ensure(ctx); err != nil {
-				log.Error("workspace ensure failed", zap.Error(err))
+				log.Error(msgWorkspaceEnsureFailed, zap.Error(err))
 				mu.Lock()
 				results = append(results, RepoResult{
 					Repo:   rc.Name,
 					Status: RepoStatusFailed,
-					Action: "sync-template",
+					Action: actionSyncTemplate,
 					ErrMsg: err.Error(),
 				})
 				mu.Unlock()
@@ -323,7 +325,7 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 				results = append(results, RepoResult{
 					Repo:   rc.Name,
 					Status: RepoStatusFailed,
-					Action: "sync-template",
+					Action: actionSyncTemplate,
 					ErrMsg: err.Error(),
 				})
 				mu.Unlock()
@@ -340,7 +342,7 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 			results = append(results, RepoResult{
 				Repo:   rc.Name,
 				Status: RepoStatusSuccess,
-				Action: "sync-template",
+				Action: actionSyncTemplate,
 				Output: fmt.Sprintf("applied=%d skipped=%d unchanged=%d",
 					len(syncResult.Applied), len(syncResult.Skipped), len(syncResult.Unchanged)),
 			})
@@ -356,7 +358,7 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 
 // Validate runs platform-guardian checks for all enabled repos.
 func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
-	report := newReport("validate")
+	report := newReport(actionValidate)
 
 	gr := &guardian.GuardianRunner{
 		Binary:   "platform-guardian",
@@ -387,16 +389,16 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 			guardianResult, err := gr.Check(ctx, rc.Name)
 			if err != nil {
 				log.Error("guardian check error", zap.Error(err))
-				mu.Lock()
-				results = append(results, RepoResult{
-					Repo:   rc.Name,
-					Status: RepoStatusFailed,
-					Action: "validate",
-					ErrMsg: err.Error(),
-				})
-				mu.Unlock()
-				return
-			}
+			mu.Lock()
+			results = append(results, RepoResult{
+				Repo:   rc.Name,
+				Status: RepoStatusFailed,
+				Action: actionValidate,
+				ErrMsg: err.Error(),
+			})
+			mu.Unlock()
+			return
+		}
 
 			status := RepoStatusSuccess
 			if !guardianResult.Passed {
@@ -407,7 +409,7 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 			results = append(results, RepoResult{
 				Repo:   rc.Name,
 				Status: status,
-				Action: "validate",
+				Action: actionValidate,
 				Output: guardianResult.Output,
 				ErrMsg: guardianResult.ErrMsg,
 			})
