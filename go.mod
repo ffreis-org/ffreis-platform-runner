@@ -1,6 +1,8 @@
 module github.com/ffreis/platform-runner
 
-go 1.21
+go 1.25
+
+toolchain go1.25.8
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.25.1
