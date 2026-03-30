@@ -40,7 +40,22 @@ func buildDeps(cmd *cobra.Command) (*deps, error) {
 		token = os.Getenv("GITHUB_TOKEN")
 	}
 
-	cfg, err := config.Load(cmd.Context(), "", flagConfig)
+	var (
+		tableName string
+		yamlPath  string
+	)
+
+	if flagConfig != "" {
+		if info, statErr := os.Stat(flagConfig); statErr == nil && !info.IsDir() {
+			// Treat an existing file path as a YAML config file.
+			yamlPath = flagConfig
+		} else {
+			// Otherwise, treat it as a DynamoDB table name.
+			tableName = flagConfig
+		}
+	}
+
+	cfg, err := config.Load(cmd.Context(), tableName, yamlPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
