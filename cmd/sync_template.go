@@ -29,12 +29,13 @@ var syncTemplateCmd = &cobra.Command{
 		}
 
 		r := runner.NewRunner(d.cfg, &executor.TerraformExecutor{}, runner.RunnerOptions{
-			TemplateDir: syncTemplateDir,
-			Workspace:   d.workspace,
-			Concurrency: 5,
-			DryRun:      d.dryRun,
-			Token:       d.token,
-			Log:         d.log,
+			TemplateDir:  syncTemplateDir,
+			SafePatterns: syncTemplateSafePatterns,
+			Workspace:    d.workspace,
+			Concurrency:  5,
+			DryRun:       d.dryRun,
+			Token:        d.token,
+			Log:          d.log,
 		})
 
 		report, err := r.SyncTemplate(cmd.Context())

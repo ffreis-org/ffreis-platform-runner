@@ -20,5 +20,4 @@ jobs:
   govulncheck:
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-security.yml@6a9b12a1c8b8a6a8ba0002a8077a1713ddf31be8
     with:
-      go-version: "1.21"
-
+      go-version: "1.25.8"

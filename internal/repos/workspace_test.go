@@ -3,6 +3,7 @@ package repos
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,22 @@ func TestWorkspaceDir_SlashReplacement(t *testing.T) {
 	want := "/workspace/example-org-infra-repo"
 	if got != want {
 		t.Errorf("Dir() = %q, want %q", got, want)
+	}
+}
+
+func TestWorkspaceRemoteURL_DoesNotEmbedToken(t *testing.T) {
+	w := &Workspace{
+		Repo:    "myorg/my-repo",
+		RootDir: "/tmp/workspace",
+		Token:   "ghp_exampletoken",
+	}
+
+	url := w.remoteURL()
+	if strings.Contains(url, w.Token) {
+		t.Fatalf("remoteURL() must not embed token, got %q", url)
+	}
+	if url != "https://github.com/myorg/my-repo.git" {
+		t.Fatalf("unexpected remoteURL(): got %q", url)
 	}
 }
 

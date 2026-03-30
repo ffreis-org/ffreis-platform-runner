@@ -21,26 +21,28 @@ const msgWorkspaceEnsureFailed = "workspace ensure failed"
 
 // RunnerOptions configures a Runner instance.
 type RunnerOptions struct {
-	TemplateDir string
-	RulesDir    string
-	Workspace   string
-	Token       string
-	Concurrency int
-	DryRun      bool
-	Log         *zap.Logger
+	TemplateDir  string
+	RulesDir     string
+	Workspace    string
+	Token        string
+	SafePatterns []string
+	Concurrency  int
+	DryRun       bool
+	Log          *zap.Logger
 }
 
 // Runner orchestrates per-repo actions using a worker pool.
 type Runner struct {
-	cfg         []config.RepoConfig
-	executor    executor.Executor
-	templateDir string
-	rulesDir    string
-	workspace   string
-	token       string
-	concurrency int
-	dryRun      bool
-	log         *zap.Logger
+	cfg          []config.RepoConfig
+	executor     executor.Executor
+	templateDir  string
+	rulesDir     string
+	workspace    string
+	token        string
+	safePatterns []string
+	concurrency  int
+	dryRun       bool
+	log          *zap.Logger
 }
 
 // NewRunner creates a Runner with the given configuration and options.
@@ -54,15 +56,16 @@ func NewRunner(cfg []config.RepoConfig, exec executor.Executor, opts RunnerOptio
 		concurrency = 5
 	}
 	return &Runner{
-		cfg:         cfg,
-		executor:    exec,
-		templateDir: opts.TemplateDir,
-		rulesDir:    opts.RulesDir,
-		workspace:   opts.Workspace,
-		token:       opts.Token,
-		concurrency: concurrency,
-		dryRun:      opts.DryRun,
-		log:         log,
+		cfg:          cfg,
+		executor:     exec,
+		templateDir:  opts.TemplateDir,
+		rulesDir:     opts.RulesDir,
+		workspace:    opts.Workspace,
+		token:        opts.Token,
+		safePatterns: opts.SafePatterns,
+		concurrency:  concurrency,
+		dryRun:       opts.DryRun,
+		log:          log,
 	}
 }
 
@@ -314,10 +317,11 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 			}
 
 			syncResult, err := template.Sync(ctx, template.SyncOptions{
-				TemplateDir: r.templateDir,
-				RepoDir:     w.Dir(),
-				DryRun:      r.dryRun,
-				Log:         log,
+				TemplateDir:  r.templateDir,
+				RepoDir:      w.Dir(),
+				SafePatterns: r.safePatterns,
+				DryRun:       r.dryRun,
+				Log:          log,
 			})
 			if err != nil {
 				log.Error("sync failed", zap.Error(err))
@@ -389,16 +393,16 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 			guardianResult, err := gr.Check(ctx, rc.Name)
 			if err != nil {
 				log.Error("guardian check error", zap.Error(err))
-			mu.Lock()
-			results = append(results, RepoResult{
-				Repo:   rc.Name,
-				Status: RepoStatusFailed,
-				Action: actionValidate,
-				ErrMsg: err.Error(),
-			})
-			mu.Unlock()
-			return
-		}
+				mu.Lock()
+				results = append(results, RepoResult{
+					Repo:   rc.Name,
+					Status: RepoStatusFailed,
+					Action: actionValidate,
+					ErrMsg: err.Error(),
+				})
+				mu.Unlock()
+				return
+			}
 
 			status := RepoStatusSuccess
 			if !guardianResult.Passed {

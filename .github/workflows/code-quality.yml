@@ -22,9 +22,11 @@ jobs:
     name: SonarCloud
     runs-on: ubuntu-latest
     # Set repository variable SONAR_ENABLED=false to skip this job entirely.
-    # Default: runs. If SONAR_TOKEN or SONAR_ORGANIZATION are missing, fails
-    # explicitly with instructions — never silently passes.
-    if: vars.SONAR_ENABLED != 'false'
+    # Default: runs. If SONAR_TOKEN is missing, fails explicitly with
+    # instructions — never silently passes.
+    #
+    # Skip running on forked PRs (secrets are not available).
+    if: vars.SONAR_ENABLED != 'false' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
 
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +35,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.25.8"
           cache: true
 
       # ── Explicit credential check ────────────────────────────────────────
@@ -47,9 +49,6 @@ jobs:
           if [ -z "${SONAR_TOKEN}" ]; then
             missing="${missing}  • SONAR_TOKEN (secret): your SonarCloud token — sonarcloud.io → My Account → Security\n"
           fi
-          if [ -z "${{ vars.SONAR_ORGANIZATION }}" ]; then
-            missing="${missing}  • SONAR_ORGANIZATION (variable): your SonarCloud organization slug\n"
-          fi
           if [ -n "${missing}" ]; then
             echo "::error title=SonarCloud not configured::Missing configuration:"
             printf "%b" "${missing}"
@@ -59,6 +58,34 @@ jobs:
             echo "To skip this job entirely: Settings → Variables → add SONAR_ENABLED=false"
             exit 1
           fi
+
+      - name: Prepare SonarCloud arguments
+        id: sonar-args
+        env:
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          org="${SONAR_ORGANIZATION:-felipefuhr}"
+          org="$(printf '%s' "${org}" | tr '[:upper:]' '[:lower:]')"
+
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          project_key="${SONAR_PROJECT_KEY:-${GITHUB_REPOSITORY_OWNER}_${repo_name}}"
+
+          base_ref="${BASE_REF:-main}"
+
+          {
+            echo "args<<EOF"
+            echo "-Dsonar.projectKey=${project_key}"
+            echo "-Dsonar.organization=${org}"
+            echo "-Dsonar.newCode.referenceBranch=${base_ref}"
+            echo "-Dsonar.go.coverage.reportPaths=coverage.out"
+            echo "-Dsonar.sources=."
+            echo "-Dsonar.exclusions=vendor/**,**/*_test.go"
+            echo "-Dsonar.tests=."
+            echo "-Dsonar.test.inclusions=**/*_test.go"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       # ── Coverage ────────────────────────────────────────────────────────────
       - name: Generate coverage for SonarCloud
@@ -76,11 +103,4 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
         with:
-          args: >
-            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY || github.event.repository.name }}
-            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
-            -Dsonar.go.coverage.reportPaths=coverage.out
-            -Dsonar.sources=.
-            -Dsonar.exclusions=vendor/**,**/*_test.go
-            -Dsonar.tests=.
-            -Dsonar.test.inclusions=**/*_test.go
+          args: ${{ steps.sonar-args.outputs.args }}
