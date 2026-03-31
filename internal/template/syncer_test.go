@@ -189,7 +189,7 @@ func TestLoggerOrNopAndWriteIfNotDryRun(t *testing.T) {
 	if loggerOrNop(nil) == nil {
 		t.Fatal("expected loggerOrNop(nil) to return a logger")
 	}
-	if got := loggerOrNop(zap.NewNop()); got == nil {
+	if loggerOrNop(zap.NewNop()) == nil {
 		t.Fatal("expected loggerOrNop(non-nil) to return the logger")
 	}
 

@@ -113,7 +113,7 @@ func TestPlanAllCmd_RunE_NoRepos(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("RunE() unexpected error: %v", runErr)
 	}
-	if got := stdout.String(); got == "" {
+	if stdout.String() == "" {
 		t.Fatal("expected output")
 	}
 }
