@@ -14,9 +14,7 @@ linters:
     - ineffassign    # assignments with no effect
     - unused         # unexported symbols that are never used
 
-    # Style / formatting
-    - gofmt          # standard formatting
-    - goimports      # import grouping
+    # Style
     - misspell       # common English misspellings
 
     # Security
@@ -30,27 +28,34 @@ linters:
     # Maintainability
     - godot          # comments must end in a period
     - nolintlint     # nolint directives must be specific and justified
+  settings:
+    govet:
+      enable:
+        - copylocks
+    errcheck:
+      check-type-assertions: true
+      check-blank: false  # `_ = expr` is intentional in tests
+    godot:
+      scope: declarations
+      capital: false
+  exclusions:
+    rules:
+      # Test files: relax errcheck and gosec
+      - path: "_test\\.go"
+        linters: [errcheck, gosec]
+      # Generated files
+      - path: "vendor/"
+        linters: [all]
 
-linters-settings:
-  govet:
-    enable:
-      - copylocks
-  errcheck:
-    check-type-assertions: true
-    check-blank: false  # `_ = expr` is intentional in tests
-  godot:
-    scope: declarations
-    capital: false
-  goimports:
-    local-prefixes: github.com/ffreis
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ffreis
 
 issues:
-  exclude-rules:
-    # Test files: relax errcheck and gosec
-    - path: "_test\\.go"
-      linters: [errcheck, gosec]
-    # Generated files
-    - path: "vendor/"
-      linters: [all]
   max-issues-per-linter: 0
   max-same-issues: 0
