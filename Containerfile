@@ -11,6 +11,8 @@ FROM golang:1.25.8-alpine AS builder
 
 WORKDIR /src
 
+RUN apk add --no-cache build-base
+
 # Download dependencies before copying source (improves layer caching).
 COPY go.mod go.sum ./
 RUN go mod download
@@ -29,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # It is never pushed or run in production.
 FROM builder AS test
 
-RUN go test ./... -count=1 -race
+RUN CGO_ENABLED=1 go test ./... -count=1 -race
 
 # ─── final ───────────────────────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12:nonroot AS final
