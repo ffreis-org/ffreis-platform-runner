@@ -33,7 +33,7 @@ jobs:
         with:
           fetch-depth: 0  # Full history for accurate blame and new-code detection
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.25.8"
           cache: true
