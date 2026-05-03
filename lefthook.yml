@@ -16,6 +16,15 @@ pre-commit:
     secret-scan:
       run: make secrets-scan-staged
 
+    agents-drift-hint:
+      run: |
+        changed=$(git diff --cached --name-only 2>/dev/null)
+        if echo "$changed" | grep -qE '\.(go|py|rs|tf)$' && \
+           ! echo "$changed" | grep -q 'AGENTS\.md'; then
+          echo "hint: source files changed — check if AGENTS.md needs updating" >&2
+        fi
+        exit 0
+
 pre-push:
   parallel: false
   commands:
