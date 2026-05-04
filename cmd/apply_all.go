@@ -22,7 +22,6 @@ var applyAllCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer d.log.Sync() //nolint:errcheck
 
 		if d.dryRun && applyAllConfirm {
 			return fmt.Errorf("--dry-run and --confirm are mutually exclusive")
@@ -32,8 +31,10 @@ var applyAllCmd = &cobra.Command{
 			Workspace:   d.workspace,
 			Concurrency: applyAllConcurrency,
 			DryRun:      d.dryRun,
+			ProgressOut: cmd.ErrOrStderr(),
 			Token:       d.token,
 			Log:         d.log,
+			UI:          d.ui,
 		})
 
 		report, err := r.ApplyAll(cmd.Context(), applyAllConfirm)
@@ -41,14 +42,7 @@ var applyAllCmd = &cobra.Command{
 			return fmt.Errorf("apply-all failed: %w", err)
 		}
 
-		fmt.Println(report.Summary())
-		for _, res := range report.Results {
-			if res.Status == runner.RepoStatusFailed {
-				fmt.Printf("  FAILED  %s [%s]: %s\n", res.Repo, res.Env, res.ErrMsg)
-			} else {
-				fmt.Printf("  ok      %s [%s]\n", res.Repo, res.Env)
-			}
-		}
+		newCommandOutput(cmd.OutOrStdout(), d.ui).Report(report)
 
 		return nil
 	},

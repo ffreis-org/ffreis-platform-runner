@@ -10,29 +10,6 @@ import (
 	"testing"
 )
 
-func TestCommandFailureSubprocess(t *testing.T) {
-	mode := os.Getenv("RUNNER_CMD_FAILURE_MODE")
-	if mode == "" {
-		return
-	}
-
-	flagConfig = os.Getenv("RUNNER_CMD_CONFIG")
-	flagLogLevel = "info"
-	flagWorkspace = os.Getenv("RUNNER_CMD_WORKSPACE")
-	validateRulesDir = os.Getenv("RUNNER_CMD_RULES")
-
-	switch mode {
-	case "plan":
-		planAllCmd.SetContext(context.Background())
-		_ = planAllCmd.RunE(planAllCmd, nil)
-	case "validate":
-		validateCmd.SetContext(context.Background())
-		_ = validateCmd.RunE(validateCmd, nil)
-	default:
-		t.Fatalf("unknown subprocess mode %q", mode)
-	}
-}
-
 func writeDisabledConfig(t *testing.T) string {
 	t.Helper()
 
@@ -65,6 +42,7 @@ func restoreCommandGlobals(t *testing.T) {
 	origDryRun := flagDryRun
 	origWorkspace := flagWorkspace
 	origToken := flagToken
+	origUI := flagUI
 	origPlanConcurrency := planAllConcurrency
 	origApplyConcurrency := applyAllConcurrency
 	origApplyConfirm := applyAllConfirm
@@ -78,6 +56,7 @@ func restoreCommandGlobals(t *testing.T) {
 		flagDryRun = origDryRun
 		flagWorkspace = origWorkspace
 		flagToken = origToken
+		flagUI = origUI
 		planAllConcurrency = origPlanConcurrency
 		applyAllConcurrency = origApplyConcurrency
 		applyAllConfirm = origApplyConfirm
@@ -94,6 +73,7 @@ func TestPlanAllCmd_RunE_NoRepos(t *testing.T) {
 	flagLogLevel = "info"
 	flagWorkspace = t.TempDir()
 	planAllConcurrency = 7
+	flagUI = "plain"
 
 	var stdout bytes.Buffer
 	origStdout := os.Stdout
@@ -126,6 +106,7 @@ func TestApplyAllCmd_RunE_MutuallyExclusiveFlags(t *testing.T) {
 	flagWorkspace = t.TempDir()
 	flagDryRun = true
 	applyAllConfirm = true
+	flagUI = "plain"
 
 	applyAllCmd.SetContext(context.Background())
 	if err := applyAllCmd.RunE(applyAllCmd, nil); err == nil || err.Error() != "--dry-run and --confirm are mutually exclusive" {
@@ -140,6 +121,7 @@ func TestApplyAllCmd_RunE_NoRepos(t *testing.T) {
 	flagLogLevel = "info"
 	flagWorkspace = t.TempDir()
 	applyAllConfirm = true
+	flagUI = "plain"
 
 	applyAllCmd.SetContext(context.Background())
 	if err := applyAllCmd.RunE(applyAllCmd, nil); err != nil {
@@ -154,6 +136,7 @@ func TestSyncTemplateCmd_RunE_RequiresTemplateDir(t *testing.T) {
 	flagLogLevel = "info"
 	flagWorkspace = t.TempDir()
 	syncTemplateDir = ""
+	flagUI = "plain"
 
 	syncTemplateCmd.SetContext(context.Background())
 	err := syncTemplateCmd.RunE(syncTemplateCmd, nil)
@@ -170,6 +153,7 @@ func TestSyncTemplateCmd_RunE_NoRepos(t *testing.T) {
 	flagWorkspace = t.TempDir()
 	syncTemplateDir = t.TempDir()
 	syncTemplateSafePatterns = []string{"*.md"}
+	flagUI = "plain"
 
 	syncTemplateCmd.SetContext(context.Background())
 	if err := syncTemplateCmd.RunE(syncTemplateCmd, nil); err != nil {
@@ -184,11 +168,102 @@ func TestValidateCmd_RunE_NoRepos(t *testing.T) {
 	flagLogLevel = "info"
 	flagWorkspace = t.TempDir()
 	validateRulesDir = t.TempDir()
+	flagUI = "plain"
 
 	validateCmd.SetContext(context.Background())
 	if err := validateCmd.RunE(validateCmd, nil); err != nil {
 		t.Fatalf("RunE() unexpected error: %v", err)
 	}
+}
+
+func TestDeliverFlemmingCmd_RunE_RequiresConfirm(t *testing.T) {
+	restoreCommandGlobals(t)
+
+	flagLogLevel = "info"
+	flagWorkspace = t.TempDir()
+	flagUI = "plain"
+	deliverFlemmingConfirm = false
+
+	deliverFlemmingCmd.SetContext(context.Background())
+	if err := deliverFlemmingCmd.RunE(deliverFlemmingCmd, nil); err == nil || err.Error() != "--confirm is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeliverFlemmingCmd_RunE_InvokesMakeWithResolvedRepos(t *testing.T) {
+	restoreCommandGlobals(t)
+
+	workspace := t.TempDir()
+	infraRepo := "acme/flemming-infra"
+	websiteRepo := "acme/flemming-website"
+	compilerRepo := "acme/website-compiler"
+	packerRepo := "acme/website-packer"
+
+	setupWorkspaceRepo(t, workspace, infraRepo)
+	setupWorkspaceRepo(t, workspace, websiteRepo)
+	setupWorkspaceRepo(t, workspace, compilerRepo)
+	setupWorkspaceRepo(t, workspace, packerRepo)
+
+	binDir := t.TempDir()
+	traceFile := filepath.Join(t.TempDir(), "make-trace.txt")
+	writeStubBin(t, binDir, "make", "#!/bin/sh\nset -eu\necho \"$PWD:$@\" >> \"$TRACE_FILE\"\n")
+	withPatchedPath(t, binDir)
+	t.Setenv("TRACE_FILE", traceFile)
+
+	flagLogLevel = "info"
+	flagWorkspace = workspace
+	flagUI = "plain"
+	deliverFlemmingConfirm = true
+	deliverFlemmingInfraRepo = infraRepo
+	deliverFlemmingWebsiteRepo = websiteRepo
+	deliverFlemmingCompilerRepo = compilerRepo
+	deliverFlemmingPackerRepo = packerRepo
+	deliverFlemmingEnv = "prod"
+	deliverFlemmingOrg = "ffreis"
+	deliverFlemmingProfile = "bootstrap-admin"
+	deliverFlemmingDomainName = "ffreis.com"
+	deliverFlemmingWWWDomainName = "www.ffreis.com"
+	deliverFlemmingRoute53ZoneName = "ffreis.com"
+	deliverFlemmingPublishPrefix = ""
+
+	var stdout bytes.Buffer
+	deliverFlemmingCmd.SetContext(context.Background())
+	deliverFlemmingCmd.SetOut(&stdout)
+	deliverFlemmingCmd.SetErr(&stdout)
+	if err := deliverFlemmingCmd.RunE(deliverFlemmingCmd, nil); err != nil {
+		t.Fatalf("RunE() unexpected error: %v", err)
+	}
+
+	trace, err := os.ReadFile(traceFile)
+	if err != nil {
+		t.Fatalf("ReadFile(trace): %v", err)
+	}
+	traceText := string(trace)
+	if !strings.Contains(traceText, filepath.Join(workspace, "acme-flemming-infra")+":go-deliver") {
+		t.Fatalf("unexpected make trace: %s", traceText)
+	}
+	if !strings.Contains(traceText, "WEBSITE_ROOT="+filepath.Join(workspace, "acme-flemming-website")) {
+		t.Fatalf("missing website root in make trace: %s", traceText)
+	}
+	if !strings.Contains(traceText, "DOMAIN_NAME=ffreis.com") {
+		t.Fatalf("missing domain override in make trace: %s", traceText)
+	}
+	if !strings.Contains(stdout.String(), "flemming delivery completed through platform-runner") {
+		t.Fatalf("unexpected output: %s", stdout.String())
+	}
+
+	deliverFlemmingConfirm = false
+	deliverFlemmingInfraRepo = "FelipeFuhr/ffreis-flemming-infra"
+	deliverFlemmingWebsiteRepo = "FelipeFuhr/flemming-website"
+	deliverFlemmingCompilerRepo = "FelipeFuhr/ffreis-website-compiler"
+	deliverFlemmingPackerRepo = "FelipeFuhr/ffreis-website-packer"
+	deliverFlemmingEnv = "prod"
+	deliverFlemmingOrg = ""
+	deliverFlemmingProfile = ""
+	deliverFlemmingDomainName = ""
+	deliverFlemmingWWWDomainName = ""
+	deliverFlemmingRoute53ZoneName = ""
+	deliverFlemmingPublishPrefix = ""
 }
 
 func runGitCmd(t *testing.T, dir string, args ...string) {
@@ -288,6 +363,21 @@ func captureStdout(t *testing.T, fn func()) string {
 	return stdout.String()
 }
 
+func assertExitError(t *testing.T, err error, wantCode int, wantMessage string) {
+	t.Helper()
+
+	exitErr, ok := err.(*ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.Code != wantCode {
+		t.Fatalf("ExitError.Code: got %d, want %d", exitErr.Code, wantCode)
+	}
+	if exitErr.Error() != wantMessage {
+		t.Fatalf("ExitError.Error(): got %q, want %q", exitErr.Error(), wantMessage)
+	}
+}
+
 func TestPlanAllCmd_RunE_ChangesOutput(t *testing.T) {
 	restoreCommandGlobals(t)
 
@@ -301,6 +391,7 @@ func TestPlanAllCmd_RunE_ChangesOutput(t *testing.T) {
 	flagConfig = writeEnabledConfig(t, repo)
 	flagLogLevel = "info"
 	flagWorkspace = workspace
+	flagUI = "plain"
 
 	out := captureStdout(t, func() {
 		planAllCmd.SetContext(context.Background())
@@ -308,8 +399,8 @@ func TestPlanAllCmd_RunE_ChangesOutput(t *testing.T) {
 			t.Fatalf("RunE() unexpected error: %v", err)
 		}
 	})
-	if !strings.Contains(out, "CHANGES") {
-		t.Fatalf("expected CHANGES output, got %q", out)
+	if !strings.Contains(out, "warn") {
+		t.Fatalf("expected warn output, got %q", out)
 	}
 }
 
@@ -326,6 +417,7 @@ func TestPlanAllCmd_RunE_OkOutput(t *testing.T) {
 	flagConfig = writeEnabledConfig(t, repo)
 	flagLogLevel = "info"
 	flagWorkspace = workspace
+	flagUI = "plain"
 
 	out := captureStdout(t, func() {
 		planAllCmd.SetContext(context.Background())
@@ -352,6 +444,7 @@ func TestApplyAllCmd_RunE_SuccessOutput(t *testing.T) {
 	flagLogLevel = "info"
 	flagWorkspace = workspace
 	applyAllConfirm = true
+	flagUI = "plain"
 
 	out := captureStdout(t, func() {
 		applyAllCmd.SetContext(context.Background())
@@ -379,6 +472,7 @@ func TestSyncTemplateCmd_RunE_SuccessOutput(t *testing.T) {
 	flagLogLevel = "info"
 	flagWorkspace = workspace
 	syncTemplateDir = templateDir
+	flagUI = "plain"
 
 	out := captureStdout(t, func() {
 		syncTemplateCmd.SetContext(context.Background())
@@ -401,6 +495,7 @@ func TestValidateCmd_RunE_SuccessOutput(t *testing.T) {
 	flagConfig = writeEnabledConfig(t, "acme/repo")
 	flagLogLevel = "info"
 	flagWorkspace = t.TempDir()
+	flagUI = "plain"
 
 	out := captureStdout(t, func() {
 		validateCmd.SetContext(context.Background())
@@ -414,51 +509,39 @@ func TestValidateCmd_RunE_SuccessOutput(t *testing.T) {
 }
 
 func TestPlanAllCmd_RunE_FailureExitsOne(t *testing.T) {
+	restoreCommandGlobals(t)
+
 	repo := "acme/repo"
 	workspace := t.TempDir()
 	setupWorkspaceRepo(t, workspace, repo)
 	binDir := t.TempDir()
 	writeStubBin(t, binDir, "terraform", "#!/bin/sh\nprintf '%s\n' 'boom' 1>&2\nexit 1\n")
-	configPath := writeEnabledConfig(t, repo)
+	withPatchedPath(t, binDir)
 
-	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=TestCommandFailureSubprocess")
-	cmd.Env = append(os.Environ(),
-		"RUNNER_CMD_FAILURE_MODE=plan",
-		"RUNNER_CMD_CONFIG="+configPath,
-		"RUNNER_CMD_WORKSPACE="+workspace,
-		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
+	flagConfig = writeEnabledConfig(t, repo)
+	flagLogLevel = "info"
+	flagWorkspace = workspace
+	flagUI = "plain"
 
-	err := cmd.Run()
-	if err == nil {
-		t.Fatal("expected subprocess to exit non-zero")
-	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok || exitErr.ExitCode() != 1 {
-		t.Fatalf("unexpected subprocess error: %v", err)
-	}
+	planAllCmd.SetContext(context.Background())
+	err := planAllCmd.RunE(planAllCmd, nil)
+	assertExitError(t, err, exitError, "one or more repositories failed planning")
 }
 
 func TestValidateCmd_RunE_FailureExitsOne(t *testing.T) {
+	restoreCommandGlobals(t)
+
 	binDir := t.TempDir()
 	writeStubBin(t, binDir, "platform-guardian", "#!/bin/sh\nprintf '%s' '{\"passed\":false,\"failures\":[{\"id\":1}]}'\n")
-	configPath := writeEnabledConfig(t, "acme/repo")
+	withPatchedPath(t, binDir)
 
-	cmd := exec.CommandContext(context.Background(), os.Args[0], "-test.run=TestCommandFailureSubprocess")
-	cmd.Env = append(os.Environ(),
-		"RUNNER_CMD_FAILURE_MODE=validate",
-		"RUNNER_CMD_CONFIG="+configPath,
-		"RUNNER_CMD_WORKSPACE="+t.TempDir(),
-		"RUNNER_CMD_RULES="+t.TempDir(),
-		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
+	flagConfig = writeEnabledConfig(t, "acme/repo")
+	flagLogLevel = "info"
+	flagWorkspace = t.TempDir()
+	validateRulesDir = t.TempDir()
+	flagUI = "plain"
 
-	err := cmd.Run()
-	if err == nil {
-		t.Fatal("expected subprocess to exit non-zero")
-	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok || exitErr.ExitCode() != 1 {
-		t.Fatalf("unexpected subprocess error: %v", err)
-	}
+	validateCmd.SetContext(context.Background())
+	err := validateCmd.RunE(validateCmd, nil)
+	assertExitError(t, err, exitError, "one or more repositories failed validation")
 }

@@ -1,18 +1,21 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/ffreis/platform-runner/internal/config"
 	"github.com/ffreis/platform-runner/internal/executor"
+	"github.com/ffreis/platform-runner/internal/logging"
+	"github.com/ffreis/platform-runner/internal/ui"
 )
 
 const (
@@ -66,8 +69,16 @@ func (m *countingMockExecutor) Apply(_ context.Context, opts executor.ExecOption
 	return &executor.ExecResult{}, nil
 }
 
-func testLogger() *zap.Logger {
-	return zap.NewNop()
+type captureProgressReporter struct {
+	messages []string
+}
+
+func (c *captureProgressReporter) Report(kind, label, message string) {
+	c.messages = append(c.messages, kind+"|"+label+"|"+message)
+}
+
+func testLogger() *slog.Logger {
+	return logging.Nop()
 }
 
 func twoEnabledRepos() []config.RepoConfig {
@@ -252,6 +263,48 @@ func TestApplyAll_RequiresConfirm(t *testing.T) {
 	_, err := r.ApplyAll(context.Background(), false)
 	if err == nil {
 		t.Fatal("expected error when confirm=false, got nil")
+	}
+}
+
+func TestNewProgressReporter_UsesPresenterAndWriter(t *testing.T) {
+	t.Parallel()
+
+	presenter, err := ui.New("plain")
+	if err != nil {
+		t.Fatalf("ui.New(): %v", err)
+	}
+
+	var out bytes.Buffer
+	reporter := newProgressReporter(presenter, &out)
+	reporter.Report("warn", "warn", "acme/repo: updating")
+
+	if got := out.String(); got != "[warn] acme/repo: updating\n" {
+		t.Fatalf("reporter output: got %q", got)
+	}
+}
+
+func TestNewProgressReporter_NoopWithoutInteractiveUI(t *testing.T) {
+	t.Parallel()
+
+	reporter := newProgressReporter(nil, io.Discard)
+	if _, ok := reporter.(noopProgressReporter); !ok {
+		t.Fatalf("expected noopProgressReporter, got %T", reporter)
+	}
+}
+
+func TestRunnerProgress_UsesReporter(t *testing.T) {
+	t.Parallel()
+
+	reporter := &captureProgressReporter{}
+	r := &Runner{reporter: reporter}
+
+	r.progress("ok", "ok", "acme/repo [dev]", "completed")
+
+	if len(reporter.messages) != 1 {
+		t.Fatalf("expected 1 progress message, got %d", len(reporter.messages))
+	}
+	if got := reporter.messages[0]; got != "ok|ok|acme/repo [dev]: completed" {
+		t.Fatalf("unexpected progress message: %q", got)
 	}
 }
 

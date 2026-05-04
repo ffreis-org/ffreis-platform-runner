@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -20,14 +20,15 @@ var planAllCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer d.log.Sync() //nolint:errcheck
 
 		r := runner.NewRunner(d.cfg, &executor.TerraformExecutor{}, runner.RunnerOptions{
 			Workspace:   d.workspace,
 			Concurrency: planAllConcurrency,
 			DryRun:      d.dryRun,
+			ProgressOut: cmd.ErrOrStderr(),
 			Token:       d.token,
 			Log:         d.log,
+			UI:          d.ui,
 		})
 
 		report, err := r.PlanAll(cmd.Context())
@@ -35,19 +36,10 @@ var planAllCmd = &cobra.Command{
 			return fmt.Errorf("plan-all failed: %w", err)
 		}
 
-		fmt.Println(report.Summary())
-		for _, res := range report.Results {
-			if res.HasChanges {
-				fmt.Printf("  CHANGES  %s [%s]\n", res.Repo, res.Env)
-			} else if res.Status == runner.RepoStatusFailed {
-				fmt.Printf("  FAILED   %s [%s]: %s\n", res.Repo, res.Env, res.ErrMsg)
-			} else {
-				fmt.Printf("  ok       %s [%s]\n", res.Repo, res.Env)
-			}
-		}
+		newCommandOutput(cmd.OutOrStdout(), d.ui).Report(report)
 
 		if report.HasFailures() {
-			os.Exit(1)
+			return &ExitError{Code: exitError, Err: errors.New("one or more repositories failed planning")}
 		}
 		return nil
 	},

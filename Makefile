@@ -1,6 +1,7 @@
 BINARY           := platform-runner
 MODULE           := github.com/ffreis/platform-runner
 BUILD_DIR        := bin
+CMD_PKG          := ./cmd/$(BINARY)
 GOFLAGS          := -trimpath
 LDFLAGS          := -w -s
 
@@ -29,11 +30,11 @@ all: build
 ## build: compile the binary into bin/
 build:
 	@mkdir -p $(BUILD_DIR)
-	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) .
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) $(CMD_PKG)
 
 ## install: install the binary to GOPATH/bin
 install:
-	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" .
+	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" ./cmd/$(BINARY)
 
 ## test: run all tests with race detector
 test:
@@ -85,7 +86,7 @@ fmt:
 ## validate: static analysis and compilation check
 validate:
 	go vet ./...
-	go build ./...
+	go build $(CMD_PKG)
 
 ## plan: not applicable — use 'make validate' or 'make ci' for Go repos
 plan:

@@ -27,12 +27,14 @@ repos:
 	origDryRun := flagDryRun
 	origWorkspace := flagWorkspace
 	origToken := flagToken
+	origUI := flagUI
 	t.Cleanup(func() {
 		flagConfig = origConfig
 		flagLogLevel = origLogLevel
 		flagDryRun = origDryRun
 		flagWorkspace = origWorkspace
 		flagToken = origToken
+		flagUI = origUI
 	})
 
 	if err := os.Setenv("GITHUB_TOKEN", "envtok"); err != nil {
@@ -45,6 +47,7 @@ repos:
 	flagDryRun = true
 	flagWorkspace = "/tmp/ws"
 	flagToken = ""
+	flagUI = "plain"
 
 	c := &cobra.Command{}
 	c.SetContext(context.Background())
@@ -93,13 +96,16 @@ func TestRootCmd_Help(t *testing.T) {
 func TestBuildDeps_InvalidLogLevel(t *testing.T) {
 	origConfig := flagConfig
 	origLogLevel := flagLogLevel
+	origUI := flagUI
 	t.Cleanup(func() {
 		flagConfig = origConfig
 		flagLogLevel = origLogLevel
+		flagUI = origUI
 	})
 
 	flagConfig = filepath.Join(t.TempDir(), "missing.yaml")
 	flagLogLevel = "invalid"
+	flagUI = "plain"
 
 	c := &cobra.Command{}
 	c.SetContext(context.Background())
@@ -115,7 +121,34 @@ func TestExecute_Help(t *testing.T) {
 	t.Cleanup(func() { os.Args = origArgs })
 
 	os.Args = []string{"platform-runner", "--help"}
-	if err := Execute(); err != nil {
-		t.Fatalf("Execute() unexpected error: %v", err)
+	if code := Execute(); code != exitOK {
+		t.Fatalf("Execute() exit code: got %d, want %d", code, exitOK)
+	}
+}
+
+func TestExecuteCommand_ReturnsExitCodeAndErrorText(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{
+		RunE: func(*cobra.Command, []string) error {
+			return &ExitError{Code: 9, Err: os.ErrPermission}
+		},
+	}
+
+	var stderr bytes.Buffer
+	code := executeCommand(cmd, &stderr)
+	if code != 9 {
+		t.Fatalf("executeCommand() code: got %d, want 9", code)
+	}
+	if got := stderr.String(); got != "error: permission denied\n" {
+		t.Fatalf("executeCommand() stderr: got %q", got)
+	}
+}
+
+func TestExitCodeForError_Default(t *testing.T) {
+	t.Parallel()
+
+	if code := exitCodeForError(os.ErrInvalid); code != exitError {
+		t.Fatalf("exitCodeForError() = %d, want %d", code, exitError)
 	}
 }

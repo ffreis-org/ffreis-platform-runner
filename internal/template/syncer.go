@@ -3,10 +3,11 @@ package template
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
-	"go.uber.org/zap"
+	"github.com/ffreis/platform-runner/internal/logging"
 )
 
 // DefaultSafePatterns are the file patterns that may be overwritten unconditionally.
@@ -18,7 +19,7 @@ type SyncOptions struct {
 	RepoDir      string
 	SafePatterns []string // if nil, DefaultSafePatterns is used
 	DryRun       bool
-	Log          *zap.Logger
+	Log          *slog.Logger
 }
 
 // SyncResult reports the outcome of a sync operation.
@@ -58,20 +59,20 @@ func safePatterns(opts SyncOptions) []string {
 	return DefaultSafePatterns
 }
 
-func loggerOrNop(log *zap.Logger) *zap.Logger {
+func loggerOrNop(log *slog.Logger) *slog.Logger {
 	if log != nil {
 		return log
 	}
-	return zap.NewNop()
+	return logging.Nop()
 }
 
-func applyDiff(result *SyncResult, opts SyncOptions, d FileDiff, log *zap.Logger) error {
+func applyDiff(result *SyncResult, opts SyncOptions, d FileDiff, log *slog.Logger) error {
 	switch d.Status {
 	case DiffSourceOnly, DiffSafe:
 		result.Applied = append(result.Applied, d.Path)
 		return writeIfNotDryRun(opts, d, log)
 	case DiffConflict:
-		log.Warn("skipping conflicting file", zap.String("file", d.Path))
+		log.Warn("skipping conflicting file", "file", d.Path)
 		result.Skipped = append(result.Skipped, d.Path)
 		return nil
 	case DiffSame:
@@ -82,7 +83,7 @@ func applyDiff(result *SyncResult, opts SyncOptions, d FileDiff, log *zap.Logger
 	}
 }
 
-func writeIfNotDryRun(opts SyncOptions, d FileDiff, log *zap.Logger) error {
+func writeIfNotDryRun(opts SyncOptions, d FileDiff, log *slog.Logger) error {
 	if opts.DryRun {
 		return nil
 	}
@@ -94,6 +95,6 @@ func writeIfNotDryRun(opts SyncOptions, d FileDiff, log *zap.Logger) error {
 	if err := os.WriteFile(dest, []byte(d.Template), 0o600); err != nil {
 		return fmt.Errorf("writing file %q: %w", dest, err)
 	}
-	log.Info("applied template file", zap.String("file", d.Path), zap.String("status", string(d.Status)))
+	log.Info("applied template file", "file", d.Path, "status", string(d.Status))
 	return nil
 }

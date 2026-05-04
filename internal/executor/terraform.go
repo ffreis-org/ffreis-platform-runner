@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // TerraformExecutor implements Executor using the terraform CLI.
@@ -27,8 +29,12 @@ func (t *TerraformExecutor) Plan(ctx context.Context, opts ExecOptions) (*ExecRe
 		args = append(args, "-var", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// terraformBinary is a package constant ("terraform"); args are fixed flags.
-	cmd := exec.CommandContext(ctx, terraformBinary, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	binary, err := resolveCommand(terraformBinary, opts.Env)
+	if err != nil {
+		return nil, fmt.Errorf("running terraform %s: %w", terraformSubcommandPlan, err)
+	}
+
+	cmd := exec.CommandContext(ctx, binary, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Dir = opts.WorkDir
 	cmd.Env = buildEnv(opts.Env)
 
@@ -36,7 +42,7 @@ func (t *TerraformExecutor) Plan(ctx context.Context, opts ExecOptions) (*ExecRe
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -84,8 +90,12 @@ func (t *TerraformExecutor) Apply(ctx context.Context, opts ExecOptions) (*ExecR
 		terraformPlanFile,
 	}
 
-	// terraformBinary is a package constant ("terraform"); args are fixed flags.
-	cmd := exec.CommandContext(ctx, terraformBinary, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	binary, err := resolveCommand(terraformBinary, opts.Env)
+	if err != nil {
+		return nil, fmt.Errorf("running terraform %s: %w", terraformSubcommandApply, err)
+	}
+
+	cmd := exec.CommandContext(ctx, binary, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Dir = opts.WorkDir
 	cmd.Env = buildEnv(opts.Env)
 
@@ -93,7 +103,7 @@ func (t *TerraformExecutor) Apply(ctx context.Context, opts ExecOptions) (*ExecR
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -124,4 +134,43 @@ func buildEnv(env map[string]string) []string {
 		result = append(result, fmt.Sprintf("%s=%s", k, v))
 	}
 	return result
+}
+
+func resolveCommand(binary string, env map[string]string) (string, error) {
+	pathValue, ok := env["PATH"]
+	if !ok || pathValue == "" {
+		return exec.LookPath(binary)
+	}
+	return lookPath(binary, pathValue)
+}
+
+func lookPath(binary, pathValue string) (string, error) {
+	if stringsContainsPathSeparator(binary) {
+		return checkExecutable(binary)
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		if dir == "" {
+			dir = "."
+		}
+		candidate := filepath.Join(dir, binary)
+		if resolved, err := checkExecutable(candidate); err == nil {
+			return resolved, nil
+		}
+	}
+	return "", &exec.Error{Name: binary, Err: exec.ErrNotFound}
+}
+
+func checkExecutable(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() || info.Mode()&0o111 == 0 {
+		return "", &exec.Error{Name: path, Err: exec.ErrNotFound}
+	}
+	return path, nil
+}
+
+func stringsContainsPathSeparator(value string) bool {
+	return filepath.Base(value) != value
 }

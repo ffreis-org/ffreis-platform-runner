@@ -3,11 +3,13 @@ package runner
 import (
 	"context"
 	"errors"
-	"fmt"
+	"io"
+	"log/slog"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/ffreis/platform-runner/internal/config"
 	"github.com/ffreis/platform-runner/internal/executor"
@@ -15,6 +17,7 @@ import (
 	"github.com/ffreis/platform-runner/internal/logging"
 	"github.com/ffreis/platform-runner/internal/repos"
 	"github.com/ffreis/platform-runner/internal/template"
+	"github.com/ffreis/platform-runner/internal/ui"
 )
 
 const msgWorkspaceEnsureFailed = "workspace ensure failed"
@@ -24,11 +27,13 @@ type RunnerOptions struct {
 	TemplateDir  string
 	RulesDir     string
 	Workspace    string
+	ProgressOut  io.Writer
 	Token        string
 	SafePatterns []string
 	Concurrency  int
 	DryRun       bool
-	Log          *zap.Logger
+	Log          *slog.Logger
+	UI           *ui.Presenter
 }
 
 // Runner orchestrates per-repo actions using a worker pool.
@@ -42,14 +47,43 @@ type Runner struct {
 	safePatterns []string
 	concurrency  int
 	dryRun       bool
-	log          *zap.Logger
+	log          *slog.Logger
+	ui           *ui.Presenter
+	reporter     progressReporter
+}
+
+type progressReporter interface {
+	Report(kind, label, message string)
+}
+
+type noopProgressReporter struct{}
+
+func (noopProgressReporter) Report(string, string, string) {}
+
+type stderrProgressReporter struct {
+	ui  *ui.Presenter
+	out io.Writer
+}
+
+func (r stderrProgressReporter) Report(kind, label, message string) {
+	if r.ui == nil || r.out == nil {
+		return
+	}
+	_, _ = io.WriteString(r.out, r.ui.Status(kind, label, message)+"\n")
+}
+
+func newProgressReporter(presenter *ui.Presenter, out io.Writer) progressReporter {
+	if presenter == nil || !presenter.Interactive() || out == nil {
+		return noopProgressReporter{}
+	}
+	return stderrProgressReporter{ui: presenter, out: out}
 }
 
 // NewRunner creates a Runner with the given configuration and options.
 func NewRunner(cfg []config.RepoConfig, exec executor.Executor, opts RunnerOptions) *Runner {
 	log := opts.Log
 	if log == nil {
-		log = zap.NewNop()
+		log = logging.Nop()
 	}
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
@@ -66,6 +100,8 @@ func NewRunner(cfg []config.RepoConfig, exec executor.Executor, opts RunnerOptio
 		concurrency:  concurrency,
 		dryRun:       opts.DryRun,
 		log:          log,
+		ui:           opts.UI,
+		reporter:     newProgressReporter(opts.UI, opts.ProgressOut),
 	}
 }
 
@@ -122,8 +158,9 @@ func (r *Runner) buildTasks() []task {
 		}
 		if len(rc.Environments) == 0 {
 			r.log.Warn("repo has no environments configured — skipping",
-				zap.String("repo", rc.Name),
+				"repo", rc.Name,
 			)
+			r.progress("muted", "skip", rc.Name, "no environments configured")
 			continue
 		}
 		for _, env := range rc.Environments {
@@ -147,8 +184,10 @@ func (r *Runner) PlanAll(ctx context.Context) (*RunReport, error) {
 	tasks := r.buildTasks()
 
 	results := r.runPool(ctx, tasks, func(ctx context.Context, t task) RepoResult {
+		started := time.Now()
 		log := logging.WithRepo(r.log, t.repo.Name, t.env)
 		log.Info("running plan")
+		r.progress("running", "...", r.repoLabel(t.repo.Name, t.env), "planning")
 
 		w := &repos.Workspace{
 			Repo:    t.repo.Name,
@@ -156,19 +195,21 @@ func (r *Runner) PlanAll(ctx context.Context) (*RunReport, error) {
 			Token:   r.token,
 		}
 		if err := w.Ensure(ctx); err != nil {
-			log.Error(msgWorkspaceEnsureFailed, zap.Error(err))
+			log.Error(msgWorkspaceEnsureFailed, "error", err)
+			r.progress("error", "fail", r.repoLabel(t.repo.Name, t.env), err.Error())
 			return RepoResult{
-				Repo:   t.repo.Name,
-				Env:    t.env,
-				Status: RepoStatusFailed,
-				Action: actionPlan,
-				ErrMsg: err.Error(),
+				Repo:     t.repo.Name,
+				Env:      t.env,
+				Status:   RepoStatusFailed,
+				Action:   actionPlan,
+				ErrMsg:   err.Error(),
+				Duration: r.formatDuration(started),
 			}
 		}
 
 		workDir := w.Dir()
 		if t.repo.TFWorkingDir != "" {
-			workDir = fmt.Sprintf("%s/%s", workDir, t.repo.TFWorkingDir)
+			workDir = filepath.Join(workDir, t.repo.TFWorkingDir)
 		}
 
 		opts := executor.ExecOptions{
@@ -179,17 +220,28 @@ func (r *Runner) PlanAll(ctx context.Context) (*RunReport, error) {
 
 		res, err := r.executor.Plan(ctx, opts)
 		if err != nil {
-			log.Error("plan failed", zap.Error(err))
+			log.Error("plan failed", "error", err)
+			r.progress("error", "fail", r.repoLabel(t.repo.Name, t.env), err.Error())
 			return RepoResult{
-				Repo:   t.repo.Name,
-				Env:    t.env,
-				Status: RepoStatusFailed,
-				Action: actionPlan,
-				ErrMsg: err.Error(),
+				Repo:     t.repo.Name,
+				Env:      t.env,
+				Status:   RepoStatusFailed,
+				Action:   actionPlan,
+				ErrMsg:   err.Error(),
+				Duration: r.formatDuration(started),
 			}
 		}
 
-		log.Info("plan complete", zap.Bool("has_changes", res.HasChanges))
+		log.Info("plan complete", "has_changes", res.HasChanges)
+		statusKind := "ok"
+		statusLabel := "ok"
+		statusDetail := "no changes"
+		if res.HasChanges {
+			statusKind = "warn"
+			statusLabel = "warn"
+			statusDetail = "plan contains updates"
+		}
+		r.progress(statusKind, statusLabel, r.repoLabel(t.repo.Name, t.env), statusDetail+" in "+r.formatDuration(started))
 		return RepoResult{
 			Repo:       t.repo.Name,
 			Env:        t.env,
@@ -197,11 +249,13 @@ func (r *Runner) PlanAll(ctx context.Context) (*RunReport, error) {
 			Action:     actionPlan,
 			Output:     res.Stdout,
 			HasChanges: res.HasChanges,
+			Duration:   r.formatDuration(started),
 		}
 	})
 
 	report.Results = results
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	report.Duration = r.reportDuration(report.StartedAt, report.FinishedAt)
 	return report, nil
 }
 
@@ -215,8 +269,10 @@ func (r *Runner) ApplyAll(ctx context.Context, confirm bool) (*RunReport, error)
 	tasks := r.buildTasks()
 
 	results := r.runPool(ctx, tasks, func(ctx context.Context, t task) RepoResult {
+		started := time.Now()
 		log := logging.WithRepo(r.log, t.repo.Name, t.env)
 		log.Info("running apply")
+		r.progress("running", "...", r.repoLabel(t.repo.Name, t.env), "applying")
 
 		w := &repos.Workspace{
 			Repo:    t.repo.Name,
@@ -224,19 +280,21 @@ func (r *Runner) ApplyAll(ctx context.Context, confirm bool) (*RunReport, error)
 			Token:   r.token,
 		}
 		if err := w.Ensure(ctx); err != nil {
-			log.Error(msgWorkspaceEnsureFailed, zap.Error(err))
+			log.Error(msgWorkspaceEnsureFailed, "error", err)
+			r.progress("error", "fail", r.repoLabel(t.repo.Name, t.env), err.Error())
 			return RepoResult{
-				Repo:   t.repo.Name,
-				Env:    t.env,
-				Status: RepoStatusFailed,
-				Action: actionApply,
-				ErrMsg: err.Error(),
+				Repo:     t.repo.Name,
+				Env:      t.env,
+				Status:   RepoStatusFailed,
+				Action:   actionApply,
+				ErrMsg:   err.Error(),
+				Duration: r.formatDuration(started),
 			}
 		}
 
 		workDir := w.Dir()
 		if t.repo.TFWorkingDir != "" {
-			workDir = fmt.Sprintf("%s/%s", workDir, t.repo.TFWorkingDir)
+			workDir = filepath.Join(workDir, t.repo.TFWorkingDir)
 		}
 
 		opts := executor.ExecOptions{
@@ -248,28 +306,33 @@ func (r *Runner) ApplyAll(ctx context.Context, confirm bool) (*RunReport, error)
 
 		res, err := r.executor.Apply(ctx, opts)
 		if err != nil {
-			log.Error("apply failed", zap.Error(err))
+			log.Error("apply failed", "error", err)
+			r.progress("error", "fail", r.repoLabel(t.repo.Name, t.env), err.Error())
 			return RepoResult{
-				Repo:   t.repo.Name,
-				Env:    t.env,
-				Status: RepoStatusFailed,
-				Action: actionApply,
-				ErrMsg: err.Error(),
+				Repo:     t.repo.Name,
+				Env:      t.env,
+				Status:   RepoStatusFailed,
+				Action:   actionApply,
+				ErrMsg:   err.Error(),
+				Duration: r.formatDuration(started),
 			}
 		}
 
 		log.Info("apply complete")
+		r.progress("ok", "ok", r.repoLabel(t.repo.Name, t.env), "applied in "+r.formatDuration(started))
 		return RepoResult{
-			Repo:   t.repo.Name,
-			Env:    t.env,
-			Status: RepoStatusSuccess,
-			Action: actionApply,
-			Output: res.Stdout,
+			Repo:     t.repo.Name,
+			Env:      t.env,
+			Status:   RepoStatusSuccess,
+			Action:   actionApply,
+			Output:   res.Stdout,
+			Duration: r.formatDuration(started),
 		}
 	})
 
 	report.Results = results
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	report.Duration = r.reportDuration(report.StartedAt, report.FinishedAt)
 	return report, nil
 }
 
@@ -293,9 +356,11 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			started := time.Now()
 
 			log := logging.WithRepo(r.log, rc.Name, "")
 			log.Info("syncing template")
+			r.progress("running", "...", rc.Name, "syncing template")
 
 			w := &repos.Workspace{
 				Repo:    rc.Name,
@@ -303,13 +368,15 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 				Token:   r.token,
 			}
 			if err := w.Ensure(ctx); err != nil {
-				log.Error(msgWorkspaceEnsureFailed, zap.Error(err))
+				log.Error(msgWorkspaceEnsureFailed, "error", err)
+				r.progress("error", "fail", rc.Name, err.Error())
 				mu.Lock()
 				results = append(results, RepoResult{
-					Repo:   rc.Name,
-					Status: RepoStatusFailed,
-					Action: actionSyncTemplate,
-					ErrMsg: err.Error(),
+					Repo:     rc.Name,
+					Status:   RepoStatusFailed,
+					Action:   actionSyncTemplate,
+					ErrMsg:   err.Error(),
+					Duration: r.formatDuration(started),
 				})
 				mu.Unlock()
 				return
@@ -323,31 +390,34 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 				Log:          log,
 			})
 			if err != nil {
-				log.Error("sync failed", zap.Error(err))
+				log.Error("sync failed", "error", err)
+				r.progress("error", "fail", rc.Name, err.Error())
 				mu.Lock()
 				results = append(results, RepoResult{
-					Repo:   rc.Name,
-					Status: RepoStatusFailed,
-					Action: actionSyncTemplate,
-					ErrMsg: err.Error(),
+					Repo:     rc.Name,
+					Status:   RepoStatusFailed,
+					Action:   actionSyncTemplate,
+					ErrMsg:   err.Error(),
+					Duration: r.formatDuration(started),
 				})
 				mu.Unlock()
 				return
 			}
 
 			log.Info("sync complete",
-				zap.Int("applied", len(syncResult.Applied)),
-				zap.Int("skipped", len(syncResult.Skipped)),
-				zap.Int("unchanged", len(syncResult.Unchanged)),
+				"applied", len(syncResult.Applied),
+				"skipped", len(syncResult.Skipped),
+				"unchanged", len(syncResult.Unchanged),
 			)
+			r.progress("ok", "ok", rc.Name, syncSummary(syncResult, r.formatDuration(started)))
 
 			mu.Lock()
 			results = append(results, RepoResult{
-				Repo:   rc.Name,
-				Status: RepoStatusSuccess,
-				Action: actionSyncTemplate,
-				Output: fmt.Sprintf("applied=%d skipped=%d unchanged=%d",
-					len(syncResult.Applied), len(syncResult.Skipped), len(syncResult.Unchanged)),
+				Repo:     rc.Name,
+				Status:   RepoStatusSuccess,
+				Action:   actionSyncTemplate,
+				Output:   syncCounts(syncResult),
+				Duration: r.formatDuration(started),
 			})
 			mu.Unlock()
 		}()
@@ -356,6 +426,7 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 	wg.Wait()
 	report.Results = results
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	report.Duration = r.reportDuration(report.StartedAt, report.FinishedAt)
 	return report, nil
 }
 
@@ -384,19 +455,23 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			started := time.Now()
 
 			log := logging.WithRepo(r.log, rc.Name, "")
 			log.Info("running validate")
+			r.progress("running", "...", rc.Name, "validating")
 
 			guardianResult, err := gr.Check(ctx, rc.Name)
 			if err != nil {
-				log.Error("guardian check error", zap.Error(err))
+				log.Error("guardian check error", "error", err)
+				r.progress("error", "fail", rc.Name, err.Error())
 				mu.Lock()
 				results = append(results, RepoResult{
-					Repo:   rc.Name,
-					Status: RepoStatusFailed,
-					Action: actionValidate,
-					ErrMsg: err.Error(),
+					Repo:     rc.Name,
+					Status:   RepoStatusFailed,
+					Action:   actionValidate,
+					ErrMsg:   err.Error(),
+					Duration: r.formatDuration(started),
 				})
 				mu.Unlock()
 				return
@@ -406,14 +481,27 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 			if !guardianResult.Passed {
 				status = RepoStatusFailed
 			}
+			statusKind := "ok"
+			statusLabel := "ok"
+			statusDetail := "all checks passed"
+			if status == RepoStatusFailed {
+				statusKind = "error"
+				statusLabel = "fail"
+				statusDetail = guardianResult.ErrMsg
+				if statusDetail == "" {
+					statusDetail = "guardian reported failures"
+				}
+			}
+			r.progress(statusKind, statusLabel, rc.Name, statusDetail+" in "+r.formatDuration(started))
 
 			mu.Lock()
 			results = append(results, RepoResult{
-				Repo:   rc.Name,
-				Status: status,
-				Action: actionValidate,
-				Output: guardianResult.Output,
-				ErrMsg: guardianResult.ErrMsg,
+				Repo:     rc.Name,
+				Status:   status,
+				Action:   actionValidate,
+				Output:   guardianResult.Output,
+				ErrMsg:   guardianResult.ErrMsg,
+				Duration: r.formatDuration(started),
 			})
 			mu.Unlock()
 		}()
@@ -422,5 +510,60 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 	wg.Wait()
 	report.Results = results
 	report.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	report.Duration = r.reportDuration(report.StartedAt, report.FinishedAt)
 	return report, nil
+}
+
+func (r *Runner) progress(kind, label, primary, detail string) {
+	if r.reporter == nil {
+		return
+	}
+	message := strings.TrimSpace(primary)
+	if detail != "" {
+		message = strings.TrimSpace(message + ": " + detail)
+	}
+	r.reporter.Report(kind, label, message)
+}
+
+func (r *Runner) repoLabel(repo, env string) string {
+	if env == "" {
+		return repo
+	}
+	return repo + " [" + env + "]"
+}
+
+func (r *Runner) formatDuration(started time.Time) string {
+	if r.ui != nil {
+		return r.ui.Duration(time.Since(started))
+	}
+	return time.Since(started).Round(100 * time.Millisecond).String()
+}
+
+func (r *Runner) reportDuration(startedAt, finishedAt string) string {
+	started, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return ""
+	}
+	finished, err := time.Parse(time.RFC3339, finishedAt)
+	if err != nil {
+		return ""
+	}
+	if r.ui != nil {
+		return r.ui.Duration(finished.Sub(started))
+	}
+	return finished.Sub(started).Round(100 * time.Millisecond).String()
+}
+
+func syncSummary(result *template.SyncResult, duration string) string {
+	counts := syncCounts(result)
+	if duration == "" {
+		return counts
+	}
+	return counts + " in " + duration
+}
+
+func syncCounts(result *template.SyncResult) string {
+	return "applied=" + strconv.Itoa(len(result.Applied)) +
+		" skipped=" + strconv.Itoa(len(result.Skipped)) +
+		" unchanged=" + strconv.Itoa(len(result.Unchanged))
 }

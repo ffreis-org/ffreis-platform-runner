@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       -trimpath \
       -ldflags="-w -s" \
       -o /bin/platform-runner \
-      .
+      ./cmd/platform-runner
 
 # ─── test ────────────────────────────────────────────────────────────────────
 # This stage is only used in CI to run tests inside the same build environment.

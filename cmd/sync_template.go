@@ -22,7 +22,6 @@ var syncTemplateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer d.log.Sync() //nolint:errcheck
 
 		if syncTemplateDir == "" {
 			return fmt.Errorf("--template-dir is required")
@@ -34,8 +33,10 @@ var syncTemplateCmd = &cobra.Command{
 			Workspace:    d.workspace,
 			Concurrency:  5,
 			DryRun:       d.dryRun,
+			ProgressOut:  cmd.ErrOrStderr(),
 			Token:        d.token,
 			Log:          d.log,
+			UI:           d.ui,
 		})
 
 		report, err := r.SyncTemplate(cmd.Context())
@@ -43,14 +44,7 @@ var syncTemplateCmd = &cobra.Command{
 			return fmt.Errorf("sync-template failed: %w", err)
 		}
 
-		fmt.Println(report.Summary())
-		for _, res := range report.Results {
-			if res.Status == runner.RepoStatusFailed {
-				fmt.Printf("  FAILED  %s: %s\n", res.Repo, res.ErrMsg)
-			} else {
-				fmt.Printf("  ok      %s: %s\n", res.Repo, res.Output)
-			}
-		}
+		newCommandOutput(cmd.OutOrStdout(), d.ui).Report(report)
 
 		return nil
 	},

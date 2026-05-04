@@ -20,6 +20,7 @@ type RepoResult struct {
 	Output     string
 	ErrMsg     string
 	HasChanges bool
+	Duration   string
 }
 
 // RunReport aggregates results from a full runner invocation.
@@ -28,6 +29,7 @@ type RunReport struct {
 	Results    []RepoResult
 	StartedAt  string // RFC3339
 	FinishedAt string
+	Duration   string
 }
 
 // Summary returns a human-readable summary of the report.
@@ -42,6 +44,9 @@ func (r *RunReport) Summary() string {
 		case RepoStatusSkipped:
 			skipped++
 		}
+	}
+	if r.Duration != "" {
+		return fmt.Sprintf("%d succeeded, %d failed, %d skipped in %s", succeeded, failed, skipped, r.Duration)
 	}
 	return fmt.Sprintf("%d succeeded, %d failed, %d skipped", succeeded, failed, skipped)
 }

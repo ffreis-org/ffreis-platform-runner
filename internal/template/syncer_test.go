@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go.uber.org/zap"
+	"github.com/ffreis/platform-runner/internal/logging"
 )
 
 const (
@@ -189,7 +189,7 @@ func TestLoggerOrNopAndWriteIfNotDryRun(t *testing.T) {
 	if loggerOrNop(nil) == nil {
 		t.Fatal("expected loggerOrNop(nil) to return a logger")
 	}
-	if loggerOrNop(zap.NewNop()) == nil {
+	if loggerOrNop(logging.Nop()) == nil {
 		t.Fatal("expected loggerOrNop(non-nil) to return the logger")
 	}
 
@@ -198,7 +198,7 @@ func TestLoggerOrNopAndWriteIfNotDryRun(t *testing.T) {
 		Path:     "nested/file.txt",
 		Template: "content",
 		Status:   DiffSourceOnly,
-	}, zap.NewNop()); err != nil {
+	}, logging.Nop()); err != nil {
 		t.Fatalf("writeIfNotDryRun() unexpected error: %v", err)
 	}
 
