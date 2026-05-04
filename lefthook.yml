@@ -1,39 +1,16 @@
-pre-commit:
-  parallel: true
-  commands:
-    hygiene-merge-markers:
-      run: ./scripts/hooks/check_merge_markers.sh
-    hygiene-large-files:
-      run: ./scripts/hooks/check_large_files.sh
-    hygiene-binary-files:
-      run: ./scripts/hooks/check_binary_files.sh
-    go-mod-drift:
-      run: ./scripts/hooks/check_go_mod_drift.sh
-    fmt-check:
-      run: make fmt-check
-    lint:
-      run: make lint
-    secret-scan:
-      run: make secrets-scan-staged
-
-    agents-drift-hint:
-      run: |
-        changed=$(git diff --cached --name-only 2>/dev/null)
-        if echo "$changed" | grep -qE '\.(go|py|rs|tf)$' && \
-           ! echo "$changed" | grep -q 'AGENTS\.md'; then
-          echo "hint: source files changed — check if AGENTS.md needs updating" >&2
-        fi
-        exit 0
+remotes:
+  - git_url: https://github.com/FelipeFuhr/ffreis-platform-standards
+    ref: main
+    configs:
+      - lefthook/base.yml
+      - lefthook/go.yml
 
 pre-push:
   parallel: false
   commands:
-    test:
-      run: make test
-    sec:
-      run: make sec
-
-commit-msg:
-  commands:
-    conventional-commits:
-      run: ./scripts/hooks/check_commit_msg.sh {1}
+    integration-tests:
+      run: make test-integration
+    quality-gates:
+      run: make quality-gates
+    generated-drift:
+      run: make hook-generated-drift
