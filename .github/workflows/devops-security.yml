@@ -39,30 +39,10 @@ jobs:
   govulncheck:
     permissions:
       contents: read
-<<<<<<< HEAD
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-security.yml@ed2f7d29467bf1fd6ec40df3953b3ee128ba3f04
     with:
       go-version: "1.25.8"
       working-directory: "."
-=======
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee
-        with:
-          go-version-file: go.mod
-          check-latest: true
-          work-dir: .
-          cache: true
-          go-package: ./...
-          output-format: text
->>>>>>> origin/main
 
   semgrep:
     permissions:
@@ -78,11 +58,7 @@ jobs:
       contents: read
       actions: read
       security-events: write
-<<<<<<< HEAD
     uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-scan-trivy-fs.yml@ed2f7d29467bf1fd6ec40df3953b3ee128ba3f04
-=======
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-scan-trivy-fs.yml@a02d736d25fa99fca8b4b623af9467d7afc472a4
->>>>>>> origin/main
     with:
       scan-ref: "."
       upload-sarif: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
