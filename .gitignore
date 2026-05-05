@@ -35,7 +35,8 @@ go.work.sum
 
 
 # Build output
-platform-runner
+/bin/platform-runner
+/platform-runner
 dist/
 
 # Go build cache
