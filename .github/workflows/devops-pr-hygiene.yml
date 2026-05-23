@@ -18,13 +18,13 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-semantic-pr.yml@c3e3e0a44d4b79697f1babaa9bf287d1b264da52
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-semantic-pr.yml@5dfbb4986ceb88f6518fa719da3a255294cf03cf
 
   actionlint:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-actionlint.yml@c3e3e0a44d4b79697f1babaa9bf287d1b264da52
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-actionlint.yml@5dfbb4986ceb88f6518fa719da3a255294cf03cf
     with:
       working-directory: "."
 
