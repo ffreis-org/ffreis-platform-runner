@@ -34,7 +34,11 @@ func (t *TerraformExecutor) Plan(ctx context.Context, opts ExecOptions) (*ExecRe
 		return nil, fmt.Errorf("running terraform %s: %w", terraformSubcommandPlan, err)
 	}
 
-	cmd := exec.CommandContext(ctx, binary, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	// binary is resolved from terraformBinary (constant) via resolveCommand
+	// which only accepts entries in the executor allowlist; args are
+	// program-controlled (plan/apply subcommand + -chdir / -var-file flags
+	// built from typed config), never from user-supplied strings.
+	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // see comment above; nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Dir = opts.WorkDir
 	cmd.Env = buildEnv(opts.Env)
 
@@ -95,7 +99,11 @@ func (t *TerraformExecutor) Apply(ctx context.Context, opts ExecOptions) (*ExecR
 		return nil, fmt.Errorf("running terraform %s: %w", terraformSubcommandApply, err)
 	}
 
-	cmd := exec.CommandContext(ctx, binary, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+	// binary is resolved from terraformBinary (constant) via resolveCommand
+	// which only accepts entries in the executor allowlist; args are
+	// program-controlled (plan/apply subcommand + -chdir / -var-file flags
+	// built from typed config), never from user-supplied strings.
+	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // see comment above; nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Dir = opts.WorkDir
 	cmd.Env = buildEnv(opts.Env)
 

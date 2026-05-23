@@ -117,7 +117,7 @@ var deliverFlemmingCmd = &cobra.Command{
 
 		out.Blank()
 		out.Status("info", "deliver", "running make "+strings.Join(args, " "))
-		makeCmd := exec.CommandContext(cmd.Context(), "make", args...) //nolint:gosec
+		makeCmd := exec.CommandContext(cmd.Context(), "make", args...)
 		makeCmd.Dir = infraDir
 		makeCmd.Stdout = cmd.OutOrStdout()
 		makeCmd.Stderr = cmd.ErrOrStderr()
