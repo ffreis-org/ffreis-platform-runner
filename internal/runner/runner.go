@@ -189,6 +189,18 @@ func (r *Runner) runPool(ctx context.Context, tasks []task, fn taskFunc) []RepoR
 	for i := 0; i < r.concurrency; i++ {
 		wg.Add(1)
 		go func() {
+			// defer-recover at the goroutine boundary is defense in depth.
+			// runTaskSafely already recovers panics from fn(), but anything
+			// else in this body (channel send, range loop, etc.) is otherwise
+			// unprotected and a panic here would kill the entire process.
+			defer func() {
+				if rec := recover(); rec != nil {
+					r.log.Error("recovered panic in runPool worker goroutine",
+						"panic", rec,
+						"stack", string(debug.Stack()),
+					)
+				}
+			}()
 			defer wg.Done()
 			for t := range taskCh {
 				resultCh <- r.runTaskSafely(ctx, t, fn)
@@ -414,9 +426,13 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
+			// Defer order is LIFO: recoverIntoResults must be List[0] so it
+			// runs LAST on the unwind, by which time the sem and wg defers
+			// have already released their resources. recoverIntoResults
+			// itself calls recover() to absorb any panic in the body below.
+			defer r.recoverIntoResults("SyncTemplate", rc.Name, actionSyncTemplate, &mu, &results)
 			defer wg.Done()
 			defer func() { <-sem }()
-			defer r.recoverIntoResults("SyncTemplate", rc.Name, actionSyncTemplate, &mu, &results)
 
 			started := time.Now()
 
@@ -515,9 +531,11 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
+			// LIFO defer order: recoverIntoResults first so it runs last,
+			// absorbing any panic from the body. See SyncTemplate above.
+			defer r.recoverIntoResults("Validate", rc.Name, actionValidate, &mu, &results)
 			defer wg.Done()
 			defer func() { <-sem }()
-			defer r.recoverIntoResults("Validate", rc.Name, actionValidate, &mu, &results)
 
 			started := time.Now()
 
