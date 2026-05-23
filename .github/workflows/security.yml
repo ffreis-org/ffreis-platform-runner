@@ -29,7 +29,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
-      - uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee
+      - uses: golang/govulncheck-action@31f7c5463448f83528bd771c2d978d940080c9fd
         with:
           go-version-file: go.mod
           check-latest: true
