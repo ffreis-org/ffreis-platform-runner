@@ -82,8 +82,13 @@ fmt-check:
 sec:
 	govulncheck ./...
 
-## ci: local equivalent of CI gate (fmt-check + vet + lint + test + sec)
-ci: fmt-check vet lint test sec
+## ci: local equivalent of CI gate (fmt-check + vet + lint + nakedgo + test + sec)
+ci: fmt-check vet lint nakedgo test sec
+
+## nakedgo: flag goroutines that don't begin with defer recover()
+##   Pulls the analyzer fresh on each run; no permanent dep added to go.mod.
+nakedgo:
+	go run github.com/FelipeFuhr/ffreis-platform-go-analyzers/cmd/nakedgo@latest ./...
 
 ## fmt: format all Go files in place
 fmt:
