@@ -3,9 +3,11 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +21,40 @@ import (
 	"github.com/ffreis/platform-runner/internal/template"
 	"github.com/ffreis/platform-runner/internal/ui"
 )
+
+// panicErrPrefix is the standard prefix for ErrMsg fields produced by a
+// recovered worker-goroutine panic.
+const panicErrPrefix = "panic: "
+
+// recoverIntoResults converts a recovered panic into a Failed RepoResult and
+// appends it under mu. Designed to be called from `defer` in a goroutine that
+// writes to a shared results slice (SyncTemplate, Validate). The phase string
+// is used only for logging context.
+//
+// Without this guard, a panic in any per-repo step (executor.Plan,
+// template.Sync, guardian.Check) propagates through the goroutine and the
+// Go runtime aborts the entire runner process. With it, the panic becomes a
+// failed result and the other workers keep processing.
+func (r *Runner) recoverIntoResults(phase, repo, action string, mu *sync.Mutex, results *[]RepoResult) {
+	rec := recover()
+	if rec == nil {
+		return
+	}
+	stack := debug.Stack()
+	r.log.Error("recovered panic in "+phase,
+		"repo", repo,
+		"panic", rec,
+		"stack", string(stack),
+	)
+	mu.Lock()
+	*results = append(*results, RepoResult{
+		Repo:   repo,
+		Status: RepoStatusFailed,
+		Action: action,
+		ErrMsg: fmt.Sprintf(panicErrPrefix+"%v", rec),
+	})
+	mu.Unlock()
+}
 
 const msgWorkspaceEnsureFailed = "workspace ensure failed"
 
@@ -114,6 +150,31 @@ type task struct {
 // taskFunc is the function executed per task, returning a RepoResult.
 type taskFunc func(ctx context.Context, t task) RepoResult
 
+// runTaskSafely runs fn(ctx, t) with panic recovery. A panicking task
+// produces a Failed RepoResult instead of crashing the runner process. Each
+// task is its own recovery scope, so one bad repo cannot disable a worker
+// for the rest of its jobCh.
+func (r *Runner) runTaskSafely(ctx context.Context, t task, fn taskFunc) (res RepoResult) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			stack := debug.Stack()
+			r.log.Error("recovered panic in task",
+				"repo", t.repo.Name,
+				"env", t.env,
+				"panic", rec,
+				"stack", string(stack),
+			)
+			res = RepoResult{
+				Repo:   t.repo.Name,
+				Env:    t.env,
+				Status: RepoStatusFailed,
+				ErrMsg: fmt.Sprintf(panicErrPrefix+"%v", rec),
+			}
+		}
+	}()
+	return fn(ctx, t)
+}
+
 // runPool dispatches tasks through a worker pool and collects results.
 func (r *Runner) runPool(ctx context.Context, tasks []task, fn taskFunc) []RepoResult {
 	taskCh := make(chan task, len(tasks))
@@ -128,10 +189,21 @@ func (r *Runner) runPool(ctx context.Context, tasks []task, fn taskFunc) []RepoR
 	for i := 0; i < r.concurrency; i++ {
 		wg.Add(1)
 		go func() {
+			// defer-recover at the goroutine boundary is defense in depth.
+			// runTaskSafely already recovers panics from fn(), but anything
+			// else in this body (channel send, range loop, etc.) is otherwise
+			// unprotected and a panic here would kill the entire process.
+			defer func() {
+				if rec := recover(); rec != nil {
+					r.log.Error("recovered panic in runPool worker goroutine",
+						"panic", rec,
+						"stack", string(debug.Stack()),
+					)
+				}
+			}()
 			defer wg.Done()
 			for t := range taskCh {
-				res := fn(ctx, t)
-				resultCh <- res
+				resultCh <- r.runTaskSafely(ctx, t, fn)
 			}
 		}()
 	}
@@ -354,8 +426,14 @@ func (r *Runner) SyncTemplate(ctx context.Context) (*RunReport, error) {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
+			// Defer order is LIFO: recoverIntoResults must be List[0] so it
+			// runs LAST on the unwind, by which time the sem and wg defers
+			// have already released their resources. recoverIntoResults
+			// itself calls recover() to absorb any panic in the body below.
+			defer r.recoverIntoResults("SyncTemplate", rc.Name, actionSyncTemplate, &mu, &results)
 			defer wg.Done()
 			defer func() { <-sem }()
+
 			started := time.Now()
 
 			log := logging.WithRepo(r.log, rc.Name, "")
@@ -453,8 +531,12 @@ func (r *Runner) Validate(ctx context.Context) (*RunReport, error) {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
+			// LIFO defer order: recoverIntoResults first so it runs last,
+			// absorbing any panic from the body. See SyncTemplate above.
+			defer r.recoverIntoResults("Validate", rc.Name, actionValidate, &mu, &results)
 			defer wg.Done()
 			defer func() { <-sem }()
+
 			started := time.Now()
 
 			log := logging.WithRepo(r.log, rc.Name, "")

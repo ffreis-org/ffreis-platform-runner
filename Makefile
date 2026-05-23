@@ -38,6 +38,12 @@ install:
 
 ## test: run all tests with race detector
 test:
+	# NOTE: -shuffle=on is intentionally omitted here. Enabling it surfaces a
+	# real pre-existing test-isolation bug in cmd/: captureStdout() in
+	# commands_test.go swaps os.Stdout globally, and t.Parallel() tests in
+	# root_test.go can interleave with captured regions, corrupting the
+	# captured output. Re-enable -shuffle=on once captureStdout is made
+	# concurrency-safe (or the t.Parallel calls are removed).
 	go test ./... -v -race -count=1
 
 ## test-short: run unit tests (no live AWS)
