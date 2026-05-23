@@ -131,7 +131,7 @@ hook-scripts: ## Download bootstrap + hook scripts from ffreis-platform-standard
 	done
 	@echo "Hook scripts downloaded."
 
-lefthook-bootstrap: hook-scripts download lefthook binary into ./.bin
+## lefthook-bootstrap: download lefthook binary into ./.bin (after fetching hook scripts)
 lefthook-bootstrap: hook-scripts
 	LEFTHOOK_VERSION="$(LEFTHOOK_VERSION)" BIN_DIR="$(LEFTHOOK_DIR)" bash ./scripts/bootstrap_lefthook.sh
 
