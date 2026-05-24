@@ -15,9 +15,6 @@ on:
   schedule:
     - cron: "0 0 * * 1"
 
-permissions:
-  contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -26,11 +23,11 @@ jobs:
   analyze:
     timeout-minutes: 30
     name: Analyze
-    runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
       security-events: write
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false

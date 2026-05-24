@@ -14,9 +14,6 @@ on:
   push:
     branches: ["main"]
 
-# Declare default permissions as read only.
-permissions: read-all
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -25,7 +22,6 @@ jobs:
   analysis:
     timeout-minutes: 15
     name: Scorecard analysis
-    runs-on: ubuntu-latest
     permissions:
       # Needed to upload the results to code-scanning dashboard.
       security-events: write
@@ -38,6 +34,7 @@ jobs:
       pull-requests: read
       # To detect SAST tools
       checks: read
+    runs-on: ubuntu-latest
 
     steps:
       - name: Harden the runner (Audit all outbound calls)

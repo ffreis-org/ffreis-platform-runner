@@ -13,13 +13,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   govulncheck:
     timeout-minutes: 30
     name: govulncheck
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
