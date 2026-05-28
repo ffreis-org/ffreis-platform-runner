@@ -111,7 +111,7 @@ secrets-scan-staged:
 	$(GITLEAKS) protect --staged --redact
 
 ## 
-PLATFORM_STANDARDS_SHA := 3f7326412e455e6ec3b1ab6f5b721ff071c6254c
+PLATFORM_STANDARDS_SHA := 3c787edb4e96ddea2e86b2add2c32139685e8db7  # v1.2.1
 PLATFORM_STANDARDS_RAW := https://raw.githubusercontent.com/FelipeFuhr/ffreis-platform-standards
 
 HOOK_SCRIPTS := \
@@ -195,3 +195,15 @@ mutation-test: ## Run mutation testing with gremlins (slow — CI only)
 ## help: print available targets
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'
+
+install-act: ## Download pinned act binary into .bin/
+	@mkdir -p scripts
+	@curl -fsSL "$(PLATFORM_STANDARDS_RAW)/$(PLATFORM_STANDARDS_SHA)/scripts/install_act.sh" \
+		-o scripts/install_act.sh && chmod +x scripts/install_act.sh
+	@bash ./scripts/install_act.sh
+
+ci-local: ## Run workflows locally via act (GH Actions quota fallback). Args via ARGS=...
+	@mkdir -p scripts
+	@curl -fsSL "$(PLATFORM_STANDARDS_RAW)/$(PLATFORM_STANDARDS_SHA)/scripts/run-ci-local.sh" \
+		-o scripts/run-ci-local.sh && chmod +x scripts/run-ci-local.sh
+	@PATH="$(CURDIR)/.bin:$(PATH)" bash ./scripts/run-ci-local.sh $(ARGS)
