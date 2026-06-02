@@ -3,6 +3,7 @@ name: Dependency Security (govulncheck)
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
   push:
     branches: [main]
@@ -15,6 +16,7 @@ concurrency:
 
 jobs:
   govulncheck:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     timeout-minutes: 30
     name: govulncheck
     permissions:

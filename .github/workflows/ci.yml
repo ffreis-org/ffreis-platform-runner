@@ -14,6 +14,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -51,6 +52,7 @@ jobs:
 
   # ── 3. Vet + Lint ──────────────────────────────────────────────────────────
   lint:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     timeout-minutes: 15
     name: Lint (vet + golangci-lint)
     permissions:
@@ -96,6 +98,7 @@ jobs:
       coverage-artifact-name: "coverage"
 
   govulncheck:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     timeout-minutes: 15
     name: Dependency Security (govulncheck)
     permissions:
@@ -148,6 +151,7 @@ jobs:
 
   # ── 6. Container final image ───────────────────────────────────────────────
   container-build:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     timeout-minutes: 30
     name: Container (final + push)
     permissions:
