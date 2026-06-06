@@ -1,6 +1,6 @@
 module github.com/ffreis/platform-runner
 
-go 1.25
+go 1.25.8
 
 toolchain go1.25.10
 
