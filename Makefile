@@ -19,7 +19,7 @@ LEFTHOOK_DIR     ?= $(CURDIR)/.bin
 LEFTHOOK_BIN     ?= $(LEFTHOOK_DIR)/lefthook
 
 .PHONY: all build install test test-short vet lint tidy clean check fmt fmt-check sec ci \
-        validate plan mutation-test help \
+        validate plan mutation-test coverage-gate quality-gates help \
         container-build container-test container-run container-push \
         secrets-scan-staged lefthook-bootstrap lefthook-install lefthook-run lefthook
 
@@ -81,6 +81,17 @@ fmt-check:
 ## sec: run govulncheck for known CVEs in dependencies
 sec:
 	govulncheck ./...
+
+## coverage-gate: run tests with coverage; fail if below COVERAGE_MIN
+coverage-gate:
+	@COVERAGE_MIN="$(COVERAGE_MIN)" COVERAGE_PACKAGES="$(COVERAGE_PACKAGES)" \
+		./scripts/hooks/check_coverage_gate.sh
+
+COVERAGE_MIN      ?= 75
+COVERAGE_PACKAGES ?= ./...
+
+## quality-gates: run the strict pre-push quality checks (test + coverage + sec)
+quality-gates: test coverage-gate sec
 
 ## ci: local equivalent of CI gate (fmt-check + vet + lint + nakedgo + test + sec)
 ci: fmt-check vet lint nakedgo test sec
