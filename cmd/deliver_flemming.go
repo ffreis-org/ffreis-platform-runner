@@ -10,7 +10,7 @@ import (
 
 	"github.com/ffreis/platform-runner/internal/logging"
 	"github.com/ffreis/platform-runner/internal/repos"
-	"github.com/ffreis/platform-runner/internal/ui"
+	"github.com/ffreis/platform-cli/pkg/ui"
 )
 
 var (

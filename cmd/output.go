@@ -7,7 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/ffreis/platform-runner/internal/runner"
-	"github.com/ffreis/platform-runner/internal/ui"
+	"github.com/ffreis/platform-cli/pkg/ui"
 )
 
 type commandOutput struct {
