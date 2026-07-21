@@ -79,5 +79,5 @@ coverage.html
 scripts/hooks/
 scripts/bootstrap_lefthook.sh
 
-# Local runner config with actual private repo names (never commit)
+# Local config (never commit)
 configs/repos.local.yaml
